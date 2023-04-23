@@ -279,3 +279,60 @@ router.post('/AddStaffCode', async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
+
+/////////////////favourites/////////////////
+const favouriteSchema = new mongoose.Schema({
+  user_id: String,
+  cat_id: String,
+});
+
+const Favourite = mongoose.model('Favourite', favouriteSchema);
+
+router.post('/addFavourites', async (ctx) => {
+  const { user_id, cat_id } = ctx.request.body;
+
+  const favourite = new Favourite({
+    user_id,
+    cat_id,
+  });
+
+  try {
+    await favourite.save();
+    ctx.status = 201;
+    ctx.body = favourite;
+  } catch (err) {
+    ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+
+router.get('/favourites/:user_id', async (ctx) => {
+  const { user_id } = ctx.params;
+
+  try {
+    const favourites = await Favourite.find({ user_id });
+
+    ctx.body = favourites;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+
+router.delete('/delFavourites/:user_id/:cat_id', async (ctx) => {
+  const { user_id, cat_id } = ctx.params;
+
+  try {
+    const favourite = await Favourite.findOneAndDelete({ user_id, cat_id });
+
+    if (!favourite) {
+      ctx.status = 404;
+      ctx.body = { message: 'Favourite not found' };
+    } else {
+      ctx.body = { message: 'Favourite deleted successfully' };
+    }
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
