@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "@koa/cors": "^4.0.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "jsonwebtoken": "^9.0.0",
     "koa": "^2.14.2",
@@ -9,8 +11,10 @@
     "mongoose": "^7.0.4"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.13",
     "@types/dotenv": "^8.2.0",
     "@types/koa": "^2.13.6",
+    "@types/koa__cors": "^4.0.0",
     "@types/koa-bodyparser": "^4.3.10",
     "@types/koa-router": "^7.4.4",
     "@types/mongoose": "^5.11.97"

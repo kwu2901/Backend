@@ -18,12 +18,14 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 var import_koa = __toESM(require("koa"));
+var import_cors = __toESM(require("@koa/cors"));
 var import_koa_router = __toESM(require("koa-router"));
 var import_koa_bodyparser = __toESM(require("koa-bodyparser"));
 var import_mongoose = __toESM(require("mongoose"));
 var import_jsonwebtoken = __toESM(require("jsonwebtoken"));
 const app = new import_koa.default();
 const router = new import_koa_router.default();
+app.use((0, import_cors.default)());
 app.use((0, import_koa_bodyparser.default)());
 app.use(router.routes());
 import_mongoose.default.connect("mongodb+srv://root:root@cluster.zciveax.mongodb.net/cat_db", {
@@ -71,6 +73,7 @@ app.listen(port, () => {
 const catListSchema = new import_mongoose.default.Schema({
   cat_name: String,
   age: Number,
+  breed: String,
   gender: String,
   location: String,
   describe: String,
@@ -87,10 +90,11 @@ router.get("/catList", async (ctx) => {
   }
 });
 router.post("/AddCat", async (ctx) => {
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   const cat = new CatList({
     cat_name,
     age,
+    breed,
     gender,
     location,
     describe,
@@ -107,11 +111,12 @@ router.post("/AddCat", async (ctx) => {
 });
 router.put("/updateCat/:id", async (ctx) => {
   const { id } = ctx.params;
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   try {
     const cat = await CatList.findByIdAndUpdate(id, {
       cat_name,
       age,
+      breed,
       gender,
       location,
       describe,
@@ -239,6 +244,51 @@ router.post("/AddStaffCode", async (ctx) => {
     ctx.body = staffCode;
   } catch (err) {
     ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+const favouriteSchema = new import_mongoose.default.Schema({
+  user_id: String,
+  cat_id: String
+});
+const Favourite = import_mongoose.default.model("Favourite", favouriteSchema);
+router.post("/addFavourites", async (ctx) => {
+  const { user_id, cat_id } = ctx.request.body;
+  const favourite = new Favourite({
+    user_id,
+    cat_id
+  });
+  try {
+    await favourite.save();
+    ctx.status = 201;
+    ctx.body = favourite;
+  } catch (err) {
+    ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+router.get("/favourites/:user_id", async (ctx) => {
+  const { user_id } = ctx.params;
+  try {
+    const favourites = await Favourite.find({ user_id });
+    ctx.body = favourites;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+router.delete("/delFavourites/:user_id/:cat_id", async (ctx) => {
+  const { user_id, cat_id } = ctx.params;
+  try {
+    const favourite = await Favourite.findOneAndDelete({ user_id, cat_id });
+    if (!favourite) {
+      ctx.status = 404;
+      ctx.body = { message: "Favourite not found" };
+    } else {
+      ctx.body = { message: "Favourite deleted successfully" };
+    }
+  } catch (err) {
+    ctx.status = 500;
     ctx.body = { message: err.message };
   }
 });

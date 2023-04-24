@@ -1,9 +1,13 @@
 import Koa from 'koa';
+import cors from '@koa/cors';
 import Router from 'koa-router';
 import bodyParser from 'koa-bodyparser';
 
 const app = new Koa();
 const router = new Router();
+
+// enable CORS for all routes
+app.use(cors());
 
 app.use(bodyParser());
 app.use(router.routes());
@@ -73,6 +77,7 @@ app.listen(port, () => {
 const catListSchema = new mongoose.Schema({
   cat_name: String,
   age: Number,
+  breed: String,
   gender: String,
   location: String,
   describe: String,
@@ -92,11 +97,12 @@ router.get('/catList', async (ctx) => {
 });
 
 router.post('/AddCat', async (ctx) => {
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
 
   const cat = new CatList({
     cat_name,
     age,
+    breed,
     gender,
     location,
     describe,
@@ -115,12 +121,13 @@ router.post('/AddCat', async (ctx) => {
 
 router.put('/updateCat/:id', async (ctx) => {
   const { id } = ctx.params;
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
 
   try {
     const cat = await CatList.findByIdAndUpdate(id, {
       cat_name,
       age,
+      breed,
       gender,
       location,
       describe,
