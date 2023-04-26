@@ -88,7 +88,22 @@ const CatList = mongoose.model('CatList', catListSchema);
 
 router.get('/catList', async (ctx) => {
   try {
-    const catList = await CatList.find().limit(50); // Fetch first 5 cats
+    const { location, gender, breed } = ctx.query;
+
+    let query = CatList.find();
+
+    // Apply filters based on query parameters
+    if (location) {
+      query = query.where('location').equals(location);
+    }
+    if (gender) {
+      query = query.where('gender').equals(gender);
+    }
+    if (breed) {
+      query = query.where('breed').equals(breed);
+    }
+
+    const catList = await query.limit(5).exec(); // Fetch first 5 cats matching the filters
     ctx.body = catList;
   } catch (err) {
     ctx.status = 500;

@@ -82,7 +82,18 @@ const catListSchema = new import_mongoose.default.Schema({
 const CatList = import_mongoose.default.model("CatList", catListSchema);
 router.get("/catList", async (ctx) => {
   try {
-    const catList = await CatList.find().limit(50);
+    const { location, gender, breed } = ctx.query;
+    let query = CatList.find();
+    if (location) {
+      query = query.where("location").equals(location);
+    }
+    if (gender) {
+      query = query.where("gender").equals(gender);
+    }
+    if (breed) {
+      query = query.where("breed").equals(breed);
+    }
+    const catList = await query.limit(5).exec();
     ctx.body = catList;
   } catch (err) {
     ctx.status = 500;
