@@ -2,6 +2,9 @@ import Koa from 'koa';
 import cors from '@koa/cors';
 import Router from 'koa-router';
 import bodyParser from 'koa-bodyparser';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
 
 const app = new Koa();
 const router = new Router();
@@ -12,28 +15,60 @@ app.use(cors());
 app.use(bodyParser());
 app.use(router.routes());
 
-import mongoose from 'mongoose';
-
-mongoose.connect('mongodb+srv://root:root@cluster.zciveax.mongodb.net/cat_db', {
+const mongo = process.env['mongo']
+mongoose.connect(mongo, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
+// Verify token middleware
+const verifyToken = async (ctx: Koa.Context, next: Koa.Next) => {
+  // Get the token from the Authorization header
+  const authHeader = ctx.request.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    // If the token is missing, return an error
+    ctx.status = 401;
+    ctx.body = { message: 'Authentication failed' };
+    return;
+  }
+
+  try {
+    // Verify the JWT token
+    const decodedToken = jwt.verify(token, secret);
+    // Attach the decoded token to the context for later use
+    ctx.state.user = decodedToken;
+    // Call the next middleware function
+    await next();
+  } catch (err) {
+    // If the token is invalid, return an error
+    ctx.status = 401;
+    ctx.body = { message: 'Authentication failed' };
+  }
+};
+
 /////////////////Users/////////////////
 const userSchema = new mongoose.Schema({
-  name: String,
-  pw: String,
+  email: String,
+  username: String,
+  password: String,
   staff: Boolean,
 });
 
 const User = mongoose.model('User', userSchema);
 
 router.post('/addUser', async (ctx) => {
-  const { name, pw, staff } = ctx.request.body;
+  const { email, username, password, staff } = ctx.request.body;
+  const saltRounds = 10;
+
+  // Hash the password before saving to the database
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
 
   const user = new User({
-    name,
-    pw,
+    email,
+    username,
+    password: hashedPassword,
     staff
   });
 
@@ -47,24 +82,48 @@ router.post('/addUser', async (ctx) => {
   }
 });
 
-import jwt from 'jsonwebtoken';
-
 const secret = 'my_secret_key';
 
-router.post('/login', async (ctx) => {
-  const { name, pw } = ctx.request.body;
+router.post('/Login', async (ctx) => {
+  const { email, password } = ctx.request.body;
 
-  const user = await User.findOne({ name, pw });
+  try {
+    // Find the user with the provided email
+    const user = await User.findOne({ email });
 
-  if (!user) {
-    ctx.status = 401;
-    ctx.body = { message: 'Authentication failed' };
-    return;
+    if (!user) {
+      // If the user does not exist, return an error
+      ctx.status = 401;
+      ctx.body = { message: 'Authentication failed' };
+      return;
+    }
+
+    // Compare the password with the hashed password in the database
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordCorrect) {
+      // If the password is incorrect, return an error
+      ctx.status = 401;
+      ctx.body = { message: 'Authentication failed' };
+      return;
+    }
+    // Generate a JWT token for the user
+    const token = jwt.sign({ sub: user.id }, secret);
+
+    // Return the user and token in the response
+    ctx.body = {
+      token,
+      user: {
+        email: user.email,
+        username: user.username,
+        _id: user._id,
+        staff: user.staff,
+      },
+    };
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
   }
-
-  const token = jwt.sign({ sub: user.id }, secret);
-
-  ctx.body = { token };
 });
 
 const port = process.env.PORT || 3000;
@@ -285,7 +344,7 @@ router.get('/staffCode/:id', async (ctx) => {
   }
 });
 
-router.post('/AddStaffCode', async (ctx) => {
+router.post('/addStaffCode', async (ctx) => {
   const { staff_id } = ctx.request.body;
 
   const staffCode = new StaffCode({
