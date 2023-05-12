@@ -142,7 +142,17 @@ router.get("/catList", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.post("/AddCat", async (ctx) => {
+router.get("/catList/:ids", async (ctx) => {
+  try {
+    const ids = ctx.params.ids.split(",");
+    const catList = await CatList.find({ _id: { $in: ids } });
+    ctx.body = catList;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+router.post("/AddCat", verifyToken, async (ctx) => {
   const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   const cat = new CatList({
     cat_name,
@@ -162,7 +172,7 @@ router.post("/AddCat", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.put("/updateCat/:id", async (ctx) => {
+router.put("/updateCat/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
   const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   try {
@@ -186,7 +196,7 @@ router.put("/updateCat/:id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.delete("/delCat/:id", async (ctx) => {
+router.delete("/delCat/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
   try {
     const cat = await CatList.findByIdAndDelete(id);
@@ -203,14 +213,16 @@ router.delete("/delCat/:id", async (ctx) => {
 });
 const messageSchema = new import_mongoose.default.Schema({
   user_id: String,
+  title: String,
   content: String,
   read: Boolean
 });
 const Message = import_mongoose.default.model("Message", messageSchema);
-router.post("/addMessages", async (ctx) => {
-  const { user_id, content, read } = ctx.request.body;
+router.post("/addMessages", verifyToken, async (ctx) => {
+  const { user_id, title, content, read } = ctx.request.body;
   const message = new Message({
     user_id,
+    title,
     content,
     read
   });
@@ -223,7 +235,7 @@ router.post("/addMessages", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.get("/messages", async (ctx) => {
+router.get("/messages", verifyToken, async (ctx) => {
   try {
     const messages = await Message.find().limit(10);
     ctx.body = messages;
@@ -232,13 +244,11 @@ router.get("/messages", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.put("/updateMessages/:id", async (ctx) => {
+router.put("/updateMessages/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
-  const { user_id, content, read } = ctx.request.body;
+  const { read } = ctx.request.body;
   try {
     const message = await Message.findByIdAndUpdate(id, {
-      user_id,
-      content,
       read
     });
     if (!message) {
@@ -252,7 +262,7 @@ router.put("/updateMessages/:id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.delete("/delMessages/:id", async (ctx) => {
+router.delete("/delMessages/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
   try {
     const message = await Message.findByIdAndDelete(id);
@@ -305,7 +315,7 @@ const favouriteSchema = new import_mongoose.default.Schema({
   cat_id: String
 });
 const Favourite = import_mongoose.default.model("Favourite", favouriteSchema);
-router.post("/addFavourites", async (ctx) => {
+router.post("/addFavourites", verifyToken, async (ctx) => {
   const { user_id, cat_id } = ctx.request.body;
   const favourite = new Favourite({
     user_id,
@@ -320,7 +330,7 @@ router.post("/addFavourites", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.get("/favourites/:user_id", async (ctx) => {
+router.get("/favourites/:user_id", verifyToken, async (ctx) => {
   const { user_id } = ctx.params;
   try {
     const favourites = await Favourite.find({ user_id });
@@ -330,7 +340,7 @@ router.get("/favourites/:user_id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.delete("/delFavourites/:user_id/:cat_id", async (ctx) => {
+router.delete("/delFavourites/:user_id/:cat_id", verifyToken, async (ctx) => {
   const { user_id, cat_id } = ctx.params;
   try {
     const favourite = await Favourite.findOneAndDelete({ user_id, cat_id });
