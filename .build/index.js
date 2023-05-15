@@ -18,29 +18,54 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 var import_koa = __toESM(require("koa"));
+var import_cors = __toESM(require("@koa/cors"));
 var import_koa_router = __toESM(require("koa-router"));
 var import_koa_bodyparser = __toESM(require("koa-bodyparser"));
-var import_mongoose = __toESM(require("mongoose"));
 var import_jsonwebtoken = __toESM(require("jsonwebtoken"));
+var import_mongoose = __toESM(require("mongoose"));
+var import_bcrypt = __toESM(require("bcrypt"));
 const app = new import_koa.default();
 const router = new import_koa_router.default();
+app.use((0, import_cors.default)());
 app.use((0, import_koa_bodyparser.default)());
 app.use(router.routes());
-import_mongoose.default.connect("mongodb+srv://root:root@cluster.zciveax.mongodb.net/cat_db", {
+const mongo = process.env["mongo"];
+import_mongoose.default.connect(mongo, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 });
+const verifyToken = async (ctx, next) => {
+  const authHeader = ctx.request.headers.authorization;
+  const token = authHeader && authHeader.split(" ")[1];
+  if (!token) {
+    ctx.status = 401;
+    ctx.body = { message: "Authentication failed" };
+    return;
+  }
+  try {
+    const decodedToken = import_jsonwebtoken.default.verify(token, secret);
+    ctx.state.user = decodedToken;
+    await next();
+  } catch (err) {
+    ctx.status = 401;
+    ctx.body = { message: "Authentication failed" };
+  }
+};
 const userSchema = new import_mongoose.default.Schema({
-  name: String,
-  pw: String,
+  email: String,
+  username: String,
+  password: String,
   staff: Boolean
 });
 const User = import_mongoose.default.model("User", userSchema);
 router.post("/addUser", async (ctx) => {
-  const { name, pw, staff } = ctx.request.body;
+  const { email, username, password, staff } = ctx.request.body;
+  const saltRounds = 10;
+  const hashedPassword = await import_bcrypt.default.hash(password, saltRounds);
   const user = new User({
-    name,
-    pw,
+    email,
+    username,
+    password: hashedPassword,
     staff
   });
   try {
@@ -53,16 +78,35 @@ router.post("/addUser", async (ctx) => {
   }
 });
 const secret = "my_secret_key";
-router.post("/login", async (ctx) => {
-  const { name, pw } = ctx.request.body;
-  const user = await User.findOne({ name, pw });
-  if (!user) {
-    ctx.status = 401;
-    ctx.body = { message: "Authentication failed" };
-    return;
+router.post("/Login", async (ctx) => {
+  const { email, password } = ctx.request.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      ctx.status = 401;
+      ctx.body = { message: "Authentication failed" };
+      return;
+    }
+    const isPasswordCorrect = await import_bcrypt.default.compare(password, user.password);
+    if (!isPasswordCorrect) {
+      ctx.status = 401;
+      ctx.body = { message: "Authentication failed" };
+      return;
+    }
+    const token = import_jsonwebtoken.default.sign({ sub: user.id }, secret);
+    ctx.body = {
+      token,
+      user: {
+        email: user.email,
+        username: user.username,
+        _id: user._id,
+        staff: user.staff
+      }
+    };
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
   }
-  const token = import_jsonwebtoken.default.sign({ sub: user.id }, secret);
-  ctx.body = { token };
 });
 const port = process.env.PORT || 3e3;
 app.listen(port, () => {
@@ -71,6 +115,7 @@ app.listen(port, () => {
 const catListSchema = new import_mongoose.default.Schema({
   cat_name: String,
   age: Number,
+  breed: String,
   gender: String,
   location: String,
   describe: String,
@@ -79,18 +124,40 @@ const catListSchema = new import_mongoose.default.Schema({
 const CatList = import_mongoose.default.model("CatList", catListSchema);
 router.get("/catList", async (ctx) => {
   try {
-    const catList = await CatList.find().limit(50);
+    const { location, gender, breed } = ctx.query;
+    let query = CatList.find();
+    if (location) {
+      query = query.where("location").equals(location);
+    }
+    if (gender) {
+      query = query.where("gender").equals(gender);
+    }
+    if (breed) {
+      query = query.where("breed").equals(breed);
+    }
+    const catList = await query.limit(5).exec();
     ctx.body = catList;
   } catch (err) {
     ctx.status = 500;
     ctx.body = { message: err.message };
   }
 });
-router.post("/AddCat", async (ctx) => {
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+router.get("/catList/:ids", async (ctx) => {
+  try {
+    const ids = ctx.params.ids.split(",");
+    const catList = await CatList.find({ _id: { $in: ids } });
+    ctx.body = catList;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+router.post("/AddCat", verifyToken, async (ctx) => {
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   const cat = new CatList({
     cat_name,
     age,
+    breed,
     gender,
     location,
     describe,
@@ -105,13 +172,14 @@ router.post("/AddCat", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.put("/updateCat/:id", async (ctx) => {
+router.put("/updateCat/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
   try {
     const cat = await CatList.findByIdAndUpdate(id, {
       cat_name,
       age,
+      breed,
       gender,
       location,
       describe,
@@ -128,7 +196,7 @@ router.put("/updateCat/:id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.delete("/delCat/:id", async (ctx) => {
+router.delete("/delCat/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
   try {
     const cat = await CatList.findByIdAndDelete(id);
@@ -145,14 +213,16 @@ router.delete("/delCat/:id", async (ctx) => {
 });
 const messageSchema = new import_mongoose.default.Schema({
   user_id: String,
+  title: String,
   content: String,
   read: Boolean
 });
 const Message = import_mongoose.default.model("Message", messageSchema);
-router.post("/addMessages", async (ctx) => {
-  const { user_id, content, read } = ctx.request.body;
+router.post("/addMessages", verifyToken, async (ctx) => {
+  const { user_id, title, content, read } = ctx.request.body;
   const message = new Message({
     user_id,
+    title,
     content,
     read
   });
@@ -165,7 +235,7 @@ router.post("/addMessages", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.get("/messages", async (ctx) => {
+router.get("/messages", verifyToken, async (ctx) => {
   try {
     const messages = await Message.find().limit(10);
     ctx.body = messages;
@@ -174,13 +244,11 @@ router.get("/messages", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.put("/updateMessages/:id", async (ctx) => {
+router.put("/updateMessages/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
-  const { user_id, content, read } = ctx.request.body;
+  const { read } = ctx.request.body;
   try {
     const message = await Message.findByIdAndUpdate(id, {
-      user_id,
-      content,
       read
     });
     if (!message) {
@@ -194,7 +262,7 @@ router.put("/updateMessages/:id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.delete("/delMessages/:id", async (ctx) => {
+router.delete("/delMessages/:id", verifyToken, async (ctx) => {
   const { id } = ctx.params;
   try {
     const message = await Message.findByIdAndDelete(id);
@@ -228,7 +296,7 @@ router.get("/staffCode/:id", async (ctx) => {
     ctx.body = { message: err.message };
   }
 });
-router.post("/AddStaffCode", async (ctx) => {
+router.post("/addStaffCode", async (ctx) => {
   const { staff_id } = ctx.request.body;
   const staffCode = new StaffCode({
     staff_id
@@ -239,6 +307,51 @@ router.post("/AddStaffCode", async (ctx) => {
     ctx.body = staffCode;
   } catch (err) {
     ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+const favouriteSchema = new import_mongoose.default.Schema({
+  user_id: String,
+  cat_id: String
+});
+const Favourite = import_mongoose.default.model("Favourite", favouriteSchema);
+router.post("/addFavourites", verifyToken, async (ctx) => {
+  const { user_id, cat_id } = ctx.request.body;
+  const favourite = new Favourite({
+    user_id,
+    cat_id
+  });
+  try {
+    await favourite.save();
+    ctx.status = 201;
+    ctx.body = favourite;
+  } catch (err) {
+    ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+router.get("/favourites/:user_id", verifyToken, async (ctx) => {
+  const { user_id } = ctx.params;
+  try {
+    const favourites = await Favourite.find({ user_id });
+    ctx.body = favourites;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+router.delete("/delFavourites/:user_id/:cat_id", verifyToken, async (ctx) => {
+  const { user_id, cat_id } = ctx.params;
+  try {
+    const favourite = await Favourite.findOneAndDelete({ user_id, cat_id });
+    if (!favourite) {
+      ctx.status = 404;
+      ctx.body = { message: "Favourite not found" };
+    } else {
+      ctx.body = { message: "Favourite deleted successfully" };
+    }
+  } catch (err) {
+    ctx.status = 500;
     ctx.body = { message: err.message };
   }
 });

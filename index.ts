@@ -1,35 +1,73 @@
 import Koa from 'koa';
+import cors from '@koa/cors';
 import Router from 'koa-router';
 import bodyParser from 'koa-bodyparser';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
 
 const app = new Koa();
 const router = new Router();
 
+// enable CORS for all routes
+app.use(cors());
 app.use(bodyParser());
 app.use(router.routes());
 
-import mongoose from 'mongoose';
-
-mongoose.connect('mongodb+srv://root:root@cluster.zciveax.mongodb.net/cat_db', {
+const mongo = process.env['mongo']
+mongoose.connect(mongo, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
+// Verify token middleware
+const verifyToken = async (ctx: Koa.Context, next: Koa.Next) => {
+  // Get the token from the Authorization header
+  const authHeader = ctx.request.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    // If the token is missing, return an error
+    ctx.status = 401;
+    ctx.body = { message: 'Authentication failed' };
+    return;
+  }
+
+  try {
+    // Verify the JWT token
+    const decodedToken = jwt.verify(token, secret);
+    // Attach the decoded token to the context for later use
+    ctx.state.user = decodedToken;
+    // Call the next middleware function
+    await next();
+  } catch (err) {
+    // If the token is invalid, return an error
+    ctx.status = 401;
+    ctx.body = { message: 'Authentication failed' };
+  }
+};
+
 /////////////////Users/////////////////
 const userSchema = new mongoose.Schema({
-  name: String,
-  pw: String,
+  email: String,
+  username: String,
+  password: String,
   staff: Boolean,
 });
 
 const User = mongoose.model('User', userSchema);
 
 router.post('/addUser', async (ctx) => {
-  const { name, pw, staff } = ctx.request.body;
+  const { email, username, password, staff } = ctx.request.body;
+  const saltRounds = 10;
+
+  // Hash the password before saving to the database
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
 
   const user = new User({
-    name,
-    pw,
+    email,
+    username,
+    password: hashedPassword,
     staff
   });
 
@@ -43,24 +81,48 @@ router.post('/addUser', async (ctx) => {
   }
 });
 
-import jwt from 'jsonwebtoken';
-
 const secret = 'my_secret_key';
 
-router.post('/login', async (ctx) => {
-  const { name, pw } = ctx.request.body;
+router.post('/Login', async (ctx) => {
+  const { email, password } = ctx.request.body;
 
-  const user = await User.findOne({ name, pw });
+  try {
+    // Find the user with the provided email
+    const user = await User.findOne({ email });
 
-  if (!user) {
-    ctx.status = 401;
-    ctx.body = { message: 'Authentication failed' };
-    return;
+    if (!user) {
+      // If the user does not exist, return an error
+      ctx.status = 401;
+      ctx.body = { message: 'Authentication failed' };
+      return;
+    }
+
+    // Compare the password with the hashed password in the database
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordCorrect) {
+      // If the password is incorrect, return an error
+      ctx.status = 401;
+      ctx.body = { message: 'Authentication failed' };
+      return;
+    }
+    // Generate a JWT token for the user
+    const token = jwt.sign({ sub: user.id }, secret);
+
+    // Return the user and token in the response
+    ctx.body = {
+      token,
+      user: {
+        email: user.email,
+        username: user.username,
+        _id: user._id,
+        staff: user.staff,
+      },
+    };
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
   }
-
-  const token = jwt.sign({ sub: user.id }, secret);
-
-  ctx.body = { token };
 });
 
 const port = process.env.PORT || 3000;
@@ -73,6 +135,7 @@ app.listen(port, () => {
 const catListSchema = new mongoose.Schema({
   cat_name: String,
   age: Number,
+  breed: String,
   gender: String,
   location: String,
   describe: String,
@@ -83,7 +146,22 @@ const CatList = mongoose.model('CatList', catListSchema);
 
 router.get('/catList', async (ctx) => {
   try {
-    const catList = await CatList.find().limit(50); // Fetch first 5 cats
+    const { location, gender, breed } = ctx.query;
+
+    let query = CatList.find();
+
+    // Apply filters based on query parameters
+    if (location) {
+      query = query.where('location').equals(location);
+    }
+    if (gender) {
+      query = query.where('gender').equals(gender);
+    }
+    if (breed) {
+      query = query.where('breed').equals(breed);
+    }
+
+    const catList = await query.limit(5).exec(); // Fetch first 5 cats matching the filters
     ctx.body = catList;
   } catch (err) {
     ctx.status = 500;
@@ -91,12 +169,24 @@ router.get('/catList', async (ctx) => {
   }
 });
 
-router.post('/AddCat', async (ctx) => {
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+router.get('/catList/:ids', async (ctx) => {
+  try {
+    const ids = ctx.params.ids.split(',');
+    const catList = await CatList.find({ _id: { $in: ids } });
+    ctx.body = catList;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+
+router.post('/AddCat', verifyToken, async (ctx) => {
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
 
   const cat = new CatList({
     cat_name,
     age,
+    breed,
     gender,
     location,
     describe,
@@ -113,14 +203,15 @@ router.post('/AddCat', async (ctx) => {
   }
 });
 
-router.put('/updateCat/:id', async (ctx) => {
+router.put('/updateCat/:id', verifyToken, async (ctx) => {
   const { id } = ctx.params;
-  const { cat_name, age, gender, location, describe, image } = ctx.request.body;
+  const { cat_name, age, breed, gender, location, describe, image } = ctx.request.body;
 
   try {
     const cat = await CatList.findByIdAndUpdate(id, {
       cat_name,
       age,
+      breed,
       gender,
       location,
       describe,
@@ -140,7 +231,7 @@ router.put('/updateCat/:id', async (ctx) => {
   }
 });
 
-router.delete('/delCat/:id', async (ctx) => {
+router.delete('/delCat/:id', verifyToken, async (ctx) => {
   const { id } = ctx.params;
 
   try {
@@ -162,17 +253,19 @@ router.delete('/delCat/:id', async (ctx) => {
 /////////////////messageList/////////////////
 const messageSchema = new mongoose.Schema({
   user_id: String,
+  title: String,
   content: String,
   read: Boolean,
 });
 
 const Message = mongoose.model('Message', messageSchema);
 
-router.post('/addMessages', async (ctx) => {
-  const { user_id, content, read } = ctx.request.body;
+router.post('/addMessages', verifyToken, async (ctx) => {
+  const { user_id, title, content, read } = ctx.request.body;
 
   const message = new Message({
     user_id,
+    title,
     content,
     read,
   });
@@ -187,7 +280,7 @@ router.post('/addMessages', async (ctx) => {
   }
 });
 
-router.get('/messages', async (ctx) => {
+router.get('/messages', verifyToken, async (ctx) => {
   try {
     const messages = await Message.find().limit(10);
     ctx.body = messages;
@@ -197,14 +290,12 @@ router.get('/messages', async (ctx) => {
   }
 });
 
-router.put('/updateMessages/:id', async (ctx) => {
+router.put('/updateMessages/:id', verifyToken, async (ctx) => {
   const { id } = ctx.params;
-  const { user_id, content, read } = ctx.request.body;
+  const { read } = ctx.request.body;
 
   try {
     const message = await Message.findByIdAndUpdate(id, {
-      user_id,
-      content,
       read,
     });
 
@@ -220,7 +311,7 @@ router.put('/updateMessages/:id', async (ctx) => {
   }
 });
 
-router.delete('/delMessages/:id', async (ctx) => {
+router.delete('/delMessages/:id', verifyToken, async (ctx) => {
   const { id } = ctx.params;
 
   try {
@@ -263,7 +354,7 @@ router.get('/staffCode/:id', async (ctx) => {
   }
 });
 
-router.post('/AddStaffCode', async (ctx) => {
+router.post('/addStaffCode', async (ctx) => {
   const { staff_id } = ctx.request.body;
 
   const staffCode = new StaffCode({
@@ -276,6 +367,63 @@ router.post('/AddStaffCode', async (ctx) => {
     ctx.body = staffCode;
   } catch (err) {
     ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+
+/////////////////favourites/////////////////
+const favouriteSchema = new mongoose.Schema({
+  user_id: String,
+  cat_id: String,
+});
+
+const Favourite = mongoose.model('Favourite', favouriteSchema);
+
+router.post('/addFavourites', verifyToken, async (ctx) => {
+  const { user_id, cat_id } = ctx.request.body;
+
+  const favourite = new Favourite({
+    user_id,
+    cat_id,
+  });
+
+  try {
+    await favourite.save();
+    ctx.status = 201;
+    ctx.body = favourite;
+  } catch (err) {
+    ctx.status = 400;
+    ctx.body = { message: err.message };
+  }
+});
+
+router.get('/favourites/:user_id', verifyToken, async (ctx) => {
+  const { user_id } = ctx.params;
+
+  try {
+    const favourites = await Favourite.find({ user_id });
+
+    ctx.body = favourites;
+  } catch (err) {
+    ctx.status = 500;
+    ctx.body = { message: err.message };
+  }
+});
+
+router.delete('/delFavourites/:user_id/:cat_id', verifyToken, async (ctx) => {
+  const { user_id, cat_id } = ctx.params;
+
+  try {
+    const favourite = await Favourite.findOneAndDelete({ user_id, cat_id });
+
+    if (!favourite) {
+      ctx.status = 404;
+      ctx.body = { message: 'Favourite not found' };
+    } else {
+      ctx.body = { message: 'Favourite deleted successfully' };
+    }
+  } catch (err) {
+    ctx.status = 500;
     ctx.body = { message: err.message };
   }
 });
